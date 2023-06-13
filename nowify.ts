@@ -1,3 +1,4 @@
+//
 ////////////////////////////////////////////////////////////////////////////////
 
 import { parse as parseArgs } from "https://deno.land/std/flags/mod.ts"
@@ -45,6 +46,8 @@ db.execute(`
   )
 `);
 
+// TODO: create indexes if not exists?
+
 db.execute(`drop table if exists routine`);
 db.execute(`
   create table routine
@@ -81,36 +84,48 @@ const routines = [
 
 for (const routine of routines) {
   const cols = Object.keys(routine);
-  console.log(`insert into routine (${cols.join(`,`)}) values (${cols.map(k=>':'+k).join(`,`)})`,routine);
   db.query(`insert into routine (${cols.join(`,`)}) values (${cols.map(k=>':'+k).join(`,`)})`, routine);
 }
-
-// TODO: create indexes if not exists?
-
-// for (const name of ["Peter Parker", "Clark Kent", "Bruce Wayne"]) {
-//   db.query("INSERT INTO people (name) VALUES (?)", [name]);
-// }
-// 
-// for (const [name] of db.query("SELECT name FROM people")) {
-//   console.log(name);
-// }
 
 switch (help?`help`:command) {
 
   case "cli":
     for await (const keypress of readKeypress()) {
       if (keypress.ctrlKey && keypress.key === 'c') break;
-      console.log(keypress);
+      const keymap = {
+        d: `done`,
+        s: `skip`,
+        n: `more`,
+      };
       // TODO: make sure that start of day is current timezone
       const [row] = db.query(`
         select
+          max()
         from routine r
         left join log l on r.event = l.event
         where l.created_at > datetime(current_timestamp, 'start of day') 
-          and TODO
+          and strftime('%H', current_timestamp)::integer between r.start and r.end
+          and 0 < instr(r.days, case strftime('%w',current_timestamp) when 0 then 'U' when 1 then 'M' when 2 then 'T' when 3 then 'W' when 4 then 'R' when 5 then 'F' when 6 then 'A' end)
         group by r.event
-        order by r.id asc
+        order by 1, 2
+        limit 1
       `);
+      if (!row) break;
+      switch (keypress.key) {
+        case "done":
+          // TODO
+          break;
+        case "skip":
+          // TODO
+          break;
+        case "more":
+          // TODO
+          break;
+        default:
+          // TODO
+          console.log(keypress);
+          break;
+      }
     }
     break;
 
