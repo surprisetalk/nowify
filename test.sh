@@ -2,6 +2,6 @@
 
 set -e
 
-for c in stats dump help ; do
+for c in dump stats help ; do
   deno run -A --unstable nowify.ts $c
 done
