@@ -77,26 +77,28 @@ const routinesVals = routines.map(
 
 const next = () => {
   const routinesVals_ = routinesVals.map((x) => `(${x.join(",")})`).join(",");
-  const [[created_at, event, action] = []] = db.query(`
-    select *
-    from (values ${routinesVals_}) as r (${routinesKeys.join(",")})
+  const [[event, desc] = []] = db.query(`
+    with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
+    select r.event, r.desc
+    from r
     left join log l on l.event = r.event and l.action = 'start'
-    where strftime('%H', current_timestamp) between r.start and r.end
-      and 0 < instr(days, case strftime('%w',current_timestamp) when 0 then 'U' when 1 then 'M' when 2 then 'T' when 3 then 'W' when 4 then 'R' when 5 then 'F' when 6 then 'A' end)
-      and event not in (
+    where cast(strftime('%H', datetime(current_timestamp,'localtime')) as integer) between r.start and r.end
+      and 0 < instr(days, case strftime('%w',datetime(current_timestamp,'localtime')) when '0' then 'U' when '1' then 'M' when '2' then 'T' when '3' then 'W' when '4' then 'R' when '5' then 'F' when '6' then 'A' end)
+      and r.event not in (
         select event
         from log
-        where created_at > datetime(current_timestamp, 'start of day') 
+        where created_at > datetime(current_timestamp, 'start of day', 'localtime') 
           and (action = 'done' or action = 'skip' and created_at > datetime(current_timestamp,'-40 minutes'))
       )
     order by l.created_at asc nulls last, r.id asc
     limit 1
   `) ?? [];
+  if (!event || !desc) return null;
   db.query(
     `insert into log (event, action) values (?, 'start')`,
     [event as string],
   );
-  return created_at && event && action && { created_at, event, action };
+  return { event, desc };
 };
 
 switch (help ? `help` : command) {
