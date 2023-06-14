@@ -199,12 +199,19 @@ switch (help ? `help` : command) {
   case "annoy": {
     // TODO: create docs for how to run this inline like `watch -n 2 -c deno annoy.ts`
     // TODO: don't beep if something has been started and its routine still might be active or more time was allottedd
+    const { event } = next() ?? {};
+    if (!event) break;
+    const [[overdue_at] = []]: string[][] = db.query(`
+      with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
+      select max(datetime(l.created_at,'+'||coalesce(r.duration,25)||' minutes'))
+      from log l
+      left join r on l.event = r.event
+      where l.event = '${event}'
+      and l.action in ('start','wait')
+    `);
+    if (new Date().getTime() < new Date(overdue_at).getTime()) break;
     // TODO: automatically start things if nothing is going?
-    const [t, event, action] = db.query(
-      `select created_at, event, action from log where action = 'start' order by created_at desc limit 1`,
-    ) ?? [];
-    console.log(t, event, action);
-    // TODO: do something more extreme than a beep if nowify hasn't been run lately
+    // TODO: do something more extreme than a beep if nowify has been ignored for a long time
     // TODO: kludge
     await Deno.run({
       cmd: `afplay -v 5 /System/Library/Sounds/Morse.aiff`.split(` `),
