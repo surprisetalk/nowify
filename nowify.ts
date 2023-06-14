@@ -1,8 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
-import { parse as parseArgs } from "https://deno.land/std/flags/mod.ts";
+import { parse as parseArgs } from "https://deno.land/std@0.191.0/flags/mod.ts";
 
-import { DB } from "https://deno.land/x/sqlite/mod.ts";
+import { DB } from "https://deno.land/x/sqlite@v3.7.2/mod.ts";
 
 import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 
@@ -123,9 +123,8 @@ const colors = {
 switch (help ? `help` : command) {
   case "cli": {
     const t = () =>
-      "" + new Date().getHours() +
-      ":" + new Date().getMinutes() +
-      ":" + new Date().getSeconds();
+      [new Date().getHours(), new Date().getMinutes(), new Date().getSeconds()]
+        .join(":");
     const keymap: Record<string, string> = {
       d: `done`,
       s: `skip`,
@@ -164,7 +163,11 @@ switch (help ? `help` : command) {
       )
       select * from times
     `).map((x) => x?.[0]) as string[];
-    const now = "15:00:00"; // TODO
+    const now = [
+      new Date().getHours(),
+      new Date().getMinutes() <= 30 ? "00" : "30",
+      "00",
+    ].join(":");
     for (const t of times) {
       const stats = Object.fromEntries(
         db.query(`
@@ -197,13 +200,11 @@ switch (help ? `help` : command) {
   }
 
   case "annoy": {
-    // TODO: create docs for how to run this inline like `watch -n 2 -c deno annoy.ts`
-    // TODO: don't beep if something has been started and its routine still might be active or more time was allottedd
     const { event } = next() ?? {};
     if (!event) break;
     const [[overdue_at] = []]: string[][] = db.query(`
       with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
-      select max(datetime(l.created_at,'+'||coalesce(r.duration,25)||' minutes'))
+      select max(datetime(l.created_at,case l.action when 'start' then '+'||coalesce(r.duration,25)||' minutes' when 'wait' then '+10 minutes' end))
       from log l
       left join r on l.event = r.event
       where l.event = '${event}'
@@ -237,6 +238,7 @@ switch (help ? `help` : command) {
   case "":
   case "help":
     // TODO
+    // TODO: create docs for how to run annoy inline like `watch -n 2 -c deno annoy.ts`
     console.log([
       "usage blah blah blah",
       "TODO",
