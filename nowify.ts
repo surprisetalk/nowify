@@ -39,7 +39,7 @@ db.execute(`
   create table if not exists log
   ( created_at timestamp not null default current_timestamp
   , event text not null check (event <> '')
-  , action text not null check (action in ('start','skip','more','done'))
+  , action text not null check (action in ('start','skip','wait','done'))
   )
 `);
 db.execute(`
@@ -58,6 +58,7 @@ const routines = [
     days: "MTWRFAU",
     start: 4,
     end: 10,
+    score: 3,
   },
   {
     event: "exercise-2",
@@ -66,6 +67,16 @@ const routines = [
     days: "MTWRFAU",
     start: 10,
     end: 14,
+    score: 2,
+  },
+  {
+    event: Math.random() + "",
+    desc: "Did you take a dump?",
+    duration: 25,
+    days: "MTWRFAU",
+    start: 0,
+    end: 23,
+    score: Math.random() * 4,
   },
 ];
 
@@ -74,9 +85,9 @@ const routinesVals = routines.map(
   (o: Record<string, unknown>, id) =>
     routinesKeys.map((k) => `'${{ id, ...o }[k]}'`),
 );
+const routinesVals_ = routinesVals.map((x) => `(${x.join(",")})`).join(",");
 
 const next = () => {
-  const routinesVals_ = routinesVals.map((x) => `(${x.join(",")})`).join(",");
   const [[event, desc, isStart] = []] = db.query(`
     with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
     select r.event, r.desc, l.action is not null
@@ -103,50 +114,110 @@ const next = () => {
   return { event, desc };
 };
 
+const colors = {
+  red: (s: string | null) => s && `\u001b[31m${s ?? ``}\u001b[39m`,
+  green: (s: string | null) => s && `\u001b[32m${s ?? ``}\u001b[39m`,
+  yellow: (s: string | null) => s && `\u001b[33m${s ?? ``}\u001b[39m`,
+};
+
 switch (help ? `help` : command) {
   case "cli": {
+    const t = () =>
+      "" + new Date().getHours() +
+      ":" + new Date().getMinutes() +
+      ":" + new Date().getSeconds();
+    const keymap: Record<string, string> = {
+      d: `done`,
+      s: `skip`,
+      w: `wait`,
+    };
     let row = next();
-    console.log(row);
+    if (!row) break;
+    console.log(`${colors.yellow(t())} ${row.desc}`);
     for await (const keypress of readKeypress()) {
       if (keypress.ctrlKey && keypress.key === "c") break;
-      if (!row) break;
-      const keymap: Record<string, string> = {
-        d: `done`,
-        s: `skip`,
-        n: `more`,
-      };
       if (keymap[keypress.key as string]) {
+        console.log(`${colors.green(keymap[keypress.key as string])}`);
         db.query(`insert into log (event, action) values (?, ?)`, [
           row.event as string,
           keymap[keypress.key as string],
         ]);
+      } else {
+        console.log(colors.red(`usage: d (done), s (skip), w (wait)`));
       }
       row = next();
-      console.log(row);
+      if (!row) break;
+      console.log(`\n${colors.yellow(t())} ${row.desc}`);
     }
     break;
   }
 
-  case "stats":
-    // TODO
+  case "stats": {
+    console.log();
+    const times = db.query(`
+      with recursive times(t) as (
+        values('04:00:00')
+        union all
+        select time(t, '+30 minutes')
+        from times
+        where t < '23:00:00'
+      )
+      select * from times
+    `).map((x) => x?.[0]) as string[];
+    const now = "15:00:00"; // TODO
+    for (const t of times) {
+      const stats = Object.fromEntries(
+        db.query(`
+          with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
+          select 
+            cast(julianday('now') - julianday(datetime(l.created_at,'localtime')) as integer) as days_ago
+            , max(coalesce(score,1)) as score
+          from log l
+          left join r on l.event = r.event
+          where l.action = 'done'
+            and time(datetime(l.created_at,'localtime')) between '${t}' and time('${t}', '+29 minutes', '+59 seconds')
+        `).filter((row) => row?.[0] !== null),
+      );
+      console.log(
+        t.match(/^([0-9]{2}):00:00$/)?.[1] ?? `  `,
+        ` `,
+        Array(61).fill(0)
+          .map((_, i) =>
+            null ??
+              (t === now ? colors.red : colors.green)(
+                [null, `░`, `▒`, `▓`, `█`][stats[i] ?? 0],
+              ) ??
+              (i % 7 === 0 ? colors.yellow(`┊`) : ` `)
+          )
+          .join(``),
+      );
+    }
+    console.log();
     break;
+  }
 
   case "annoy": {
     // TODO: create docs for how to run this inline like `watch -n 2 -c deno annoy.ts`
     // TODO: don't beep if something has been started and its routine still might be active or more time was allottedd
+    // TODO: automatically start things if nothing is going?
     const [t, event, action] = db.query(
-      `select created_at, event, action from log order by created_at desc limit 1`,
+      `select created_at, event, action from log where action = 'start' order by created_at desc limit 1`,
     ) ?? [];
     console.log(t, event, action);
     // TODO: do something more extreme than a beep if nowify hasn't been run lately
+    // TODO: kludge
     await Deno.run({
       cmd: `afplay -v 5 /System/Library/Sounds/Morse.aiff`.split(` `),
     }).status();
     break;
   }
 
-  case "export":
-    // TODO
+  case "dump":
+    console.log("created_at, event, action");
+    for (const row of db.query(`select * from log`)) {
+      // TODO: this doesn't escape quotes or commas
+      console.log(row.join(`, `));
+    }
     break;
 
   case "server":
@@ -154,10 +225,11 @@ switch (help ? `help` : command) {
     break;
 
   default:
-    console.log(`invalid command: '${command}'`);
+    console.log(colors.red(`invalid command: "${command}"`));
     // falls through
   case "":
   case "help":
+    // TODO
     console.log([
       "usage blah blah blah",
       "TODO",
