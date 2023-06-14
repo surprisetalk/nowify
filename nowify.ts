@@ -77,9 +77,9 @@ const routinesVals = routines.map(
 
 const next = () => {
   const routinesVals_ = routinesVals.map((x) => `(${x.join(",")})`).join(",");
-  const [[event, desc] = []] = db.query(`
+  const [[event, desc, isStart] = []] = db.query(`
     with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
-    select r.event, r.desc
+    select r.event, r.desc, l.action is not null
     from r
     left join log l on l.event = r.event and l.action = 'start'
     where cast(strftime('%H', datetime(current_timestamp,'localtime')) as integer) between r.start and r.end
@@ -94,10 +94,12 @@ const next = () => {
     limit 1
   `) ?? [];
   if (!event || !desc) return null;
-  db.query(
-    `insert into log (event, action) values (?, 'start')`,
-    [event as string],
-  );
+  if (!isStart) {
+    db.query(
+      `insert into log (event, action) values (?, 'start')`,
+      [event as string],
+    );
+  }
   return { event, desc };
 };
 
@@ -108,26 +110,16 @@ switch (help ? `help` : command) {
     for await (const keypress of readKeypress()) {
       if (keypress.ctrlKey && keypress.key === "c") break;
       if (!row) break;
-      const keymap = {
+      const keymap: Record<string, string> = {
         d: `done`,
         s: `skip`,
         n: `more`,
       };
-      // TODO: make sure that start of day is current timezone
-      switch (keypress.key) {
-        case "done":
-          // TODO
-          break;
-        case "skip":
-          // TODO
-          break;
-        case "more":
-          // TODO
-          break;
-        default:
-          // TODO
-          console.log(keypress);
-          break;
+      if (keymap[keypress.key as string]) {
+        db.query(`insert into log (event, action) values (?, ?)`, [
+          row.event as string,
+          keymap[keypress.key as string],
+        ]);
       }
       row = next();
       console.log(row);
