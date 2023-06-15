@@ -6,6 +6,8 @@ import { DB } from "https://deno.land/x/sqlite@v3.7.2/mod.ts";
 
 import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 
+import { serve } from "https://deno.land/std@0.191.0/http/server.ts";
+
 ////////////////////////////////////////////////////////////////////////////////
 
 // TODO: rendering options
@@ -49,7 +51,7 @@ db.execute(`
   )
 `);
 
-// TODO: parse .config/routine.csv
+// TODO: parse .config/nowify/routines.csv
 const routines = [
   {
     event: "exercise-1",
@@ -87,6 +89,7 @@ const routinesVals = routines.map(
 );
 const routinesVals_ = routinesVals.map((x) => `(${x.join(",")})`).join(",");
 
+// TODO: rename this to now?
 const next = () => {
   const [[event, desc, isStart] = []] = db.query(`
     with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
@@ -203,6 +206,7 @@ switch (help ? `help` : command) {
   case "annoy": {
     const { event } = next() ?? {};
     if (!event) break;
+    // TODO: make a different sound if there's nothing started or waited but there's available routines that can be started
     const [[overdue_at] = []]: string[][] = db.query(`
       with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
       select max(datetime(l.created_at,case l.action when 'start' then '+'||coalesce(r.duration,25)||' minutes' when 'wait' then '+10 minutes' end))
@@ -212,7 +216,6 @@ switch (help ? `help` : command) {
       and l.action in ('start','wait')
     `);
     if (new Date().getTime() < new Date(overdue_at).getTime()) break;
-    // TODO: automatically start things if nothing is going?
     // TODO: do something more extreme than a beep if nowify has been ignored for a long time
     // TODO: kludge
     await Deno.run({
@@ -229,9 +232,27 @@ switch (help ? `help` : command) {
     }
     break;
 
-  case "server":
-    // TODO
+  case "server": {
+    await serve(
+      (req: Request): Response => {
+        const route = new URLPattern({ pathname: "/:route" }).exec(req.url)
+          ?.pathname?.groups?.route ?? "";
+        if (route === "event") {
+          return Response.json(next(), { status: 200 });
+        }
+        if (["done", "skip", "wait"].includes(route)) {
+          db.query(
+            `insert into log (event, action) values (?, 'start')`,
+            [route],
+          );
+          return new Response(null, { status: 201 });
+        }
+        return new Response(`not found`, { status: 404 });
+      },
+      { port: 8000 },
+    );
     break;
+  }
 
   default:
     console.log(colors.red(`invalid command: "${command}"`));
