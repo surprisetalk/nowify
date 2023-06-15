@@ -8,6 +8,8 @@ import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 
 import { serve } from "https://deno.land/std@0.191.0/http/server.ts";
 
+// TODO: https://deno.land/x/csv
+
 ////////////////////////////////////////////////////////////////////////////////
 
 // TODO: rendering options
@@ -90,8 +92,9 @@ const routinesVals = routines.map(
 const routinesVals_ = routinesVals.map((x) => `(${x.join(",")})`).join(",");
 
 // TODO: rename this to now?
-const next = () => {
-  const [[event, desc, isStart] = []] = db.query(`
+const start = (): { event: string; desc: string } | null => {
+  const [[event, desc, isStart] = []]: [string?, string?, boolean?][] =
+    db.query(`
     with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
     select r.event, r.desc, l.action is not null
     from r
@@ -133,7 +136,7 @@ switch (help ? `help` : command) {
       s: `skip`,
       w: `wait`,
     };
-    let row = next();
+    let row = start();
     if (!row) break;
     console.log(`${colors.yellow(t())} ${row.desc}`);
     for await (const keypress of readKeypress()) {
@@ -147,7 +150,7 @@ switch (help ? `help` : command) {
       } else {
         console.log(colors.red(`usage: d (done), s (skip), w (wait)`));
       }
-      row = next();
+      row = start();
       if (!row) break;
       console.log(`\n${colors.yellow(t())} ${row.desc}`);
     }
@@ -204,7 +207,7 @@ switch (help ? `help` : command) {
   }
 
   case "annoy": {
-    const { event } = next() ?? {};
+    const { event } = start() ?? {};
     if (!event) break;
     // TODO: make a different sound if there's nothing started or waited but there's available routines that can be started
     const [[overdue_at] = []]: string[][] = db.query(`
@@ -238,13 +241,16 @@ switch (help ? `help` : command) {
         const route = new URLPattern({ pathname: "/:route" }).exec(req.url)
           ?.pathname?.groups?.route ?? "";
         if (route === "event") {
-          return Response.json(next(), { status: 200 });
+          return Response.json(start(), { status: 200 });
         }
         if (["done", "skip", "wait"].includes(route)) {
-          db.query(
-            `insert into log (event, action) values (?, 'start')`,
-            [route],
-          );
+          const { event } = start() ?? {};
+          if (event) {
+            db.query(
+              `insert into log (event, action) values (?, ?)`,
+              [event, route],
+            );
+          }
           return new Response(null, { status: 201 });
         }
         return new Response(`not found`, { status: 404 });
