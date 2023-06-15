@@ -169,11 +169,12 @@ switch (help ? `help` : command) {
       "00",
     ].join(":");
     for (const t of times) {
+      // TODO: Rework this so that the daily wraparound can be adjusted, i.e. "midnight" can be moved around.
       const stats = Object.fromEntries(
         db.query(`
           with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
           select 
-            cast(julianday('now') - julianday(datetime(l.created_at,'localtime')) as integer) as days_ago
+            cast(julianday('now') as integer) - cast(julianday(l.created_at) as integer) as days_ago
             , max(coalesce(score,1)) as score
           from log l
           left join r on l.event = r.event
