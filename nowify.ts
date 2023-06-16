@@ -8,27 +8,21 @@ import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 
 import { serve } from "https://deno.land/std@0.191.0/http/server.ts";
 
-// TODO: https://deno.land/x/csv
+import { readCSVObjects } from "https://deno.land/x/csv@v0.8.0/mod.ts";
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// TODO: rendering options
-// TODO: routine-specific hooks (execute bash)
-// TODO: routines (.config)
-// TODO: allow for different frontends (esp. webapp/localhost)
-// TODO: remap keys
-// TODO: if you want to use envvars, pass them into the cli via --config $NOWIFY_CONFIG
-
-const { _: args, help } = parseArgs(
+const { _: args, help, routines: csv, db: sqliteFile } = parseArgs(
   Deno.args,
   {
     default: {
       help: false,
-      config: `TODO`,
+      routines: `~/.config/nowify/routines.csv`,
+      db: `nowify.db`, // TODO: Where is the best place to store this by default?
     },
     boolean: ["help"],
-    string: ["config"],
-    alias: { h: "help", c: "config" },
+    string: ["routines", "db"],
+    alias: { h: "help" },
   },
 );
 
@@ -36,8 +30,7 @@ const command = args.join(` `).trim();
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// TODO: what to do if nowify db is not found? ask where to create new?
-const db = new DB(`nowify.db`);
+const db = new DB(sqliteFile);
 
 db.execute(`
   create table if not exists log
@@ -53,36 +46,12 @@ db.execute(`
   )
 `);
 
-// TODO: parse .config/nowify/routines.csv
-const routines = [
-  {
-    event: "exercise-1",
-    desc: "Did you exercise and listen to an audiobook? (1)",
-    duration: 25,
-    days: "MTWRFAU",
-    start: 4,
-    end: 10,
-    score: 3,
-  },
-  {
-    event: "exercise-2",
-    desc: "Did you exercise and listen to an audiobook? (2)",
-    duration: 25,
-    days: "MTWRFAU",
-    start: 10,
-    end: 14,
-    score: 2,
-  },
-  {
-    event: Math.random() + "",
-    desc: "Did you take a dump?",
-    duration: 25,
-    days: "MTWRFAU",
-    start: 0,
-    end: 23,
-    score: Math.random() * 4,
-  },
-];
+const routines = [];
+const f = await Deno.open(csv.replace(`~`, Deno.env.get("HOME") ?? `~`));
+for await (const routine of readCSVObjects(f)) {
+  routines.push(routine);
+}
+f.close();
 
 const routinesKeys = ["id", ...Object.keys(routines?.[0] ?? {})]; // TODO: kludge
 const routinesVals = routines.map(
@@ -91,7 +60,6 @@ const routinesVals = routines.map(
 );
 const routinesVals_ = routinesVals.map((x) => `(${x.join(",")})`).join(",");
 
-// TODO: rename this to now?
 const start = (): { event: string; desc: string } | null => {
   const [[event, desc, isStart] = []]: [string?, string?, boolean?][] =
     db.query(`
@@ -227,6 +195,7 @@ switch (help ? `help` : command) {
     break;
   }
 
+  // TODO: change name to export and add import option
   case "dump":
     console.log("created_at, event, action");
     for (const row of db.query(`select * from log`)) {
@@ -269,8 +238,6 @@ switch (help ? `help` : command) {
     // TODO: create docs for how to run annoy inline like `watch -n 2 -c deno annoy.ts`
     console.log([
       "usage blah blah blah",
-      "TODO",
-      "TODO",
     ].join(`\n`));
     break;
 }
