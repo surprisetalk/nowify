@@ -195,7 +195,7 @@ switch (help ? `help` : command) {
     break;
   }
 
-  // TODO: change name to export and add import option
+  // TODO: change name to "export" and add import option
   case "dump":
     console.log("created_at, event, action");
     for (const row of db.query(`select * from log`)) {
