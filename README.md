@@ -27,7 +27,28 @@ Add a routines config to `~/.config/nowify/routines.csv`.
 
 <details>
 
-<summary>example `routines.csv`</summary>
+<summary>small example</summary>
+
+```
+days, start, end, duration, score, event, desc
+MTWRFAU,  4, 10, 25, 3, exercise-1, Did you exercise? (1)
+MTWRFAU, 10, 14, 25, 3, exercise-2, Did you exercise? (2)
+MTWRFAU, 14, 18, 25, 3, exercise-3, Did you exercise? (3)
+MTWRFAU,  0, 23, 25, 4,     work-1, Did you do 25 minutes of deep work? (1)
+MTWRFAU,  0, 23, 25, 4,     work-2, Did you do 25 minutes of deep work? (2)
+MTWRFAU,  0, 23, 25, 4,     work-3, Did you do 25 minutes of deep work? (3)
+MTWRFAU,  0, 23, 25, 4,     work-4, Did you do 25 minutes of deep work? (4)
+MTWRFAU,  0, 23, 25, 4,     work-5, Did you do 25 minutes of deep work? (5)
+MTWRFAU,  0, 23, 25, 4,     work-6, Did you do 25 minutes of deep work? (6)
+MTWRFAU,  0, 23, 25, 4,     work-7, Did you do 25 minutes of deep work? (7)
+MTWRFAU,  0, 23, 25, 4,     work-8, Did you do 25 minutes of deep work? (8)
+```
+
+</details>
+
+<details>
+
+<summary>big example</summary>
 
 ```
 days, start, end, duration, score, event, desc
