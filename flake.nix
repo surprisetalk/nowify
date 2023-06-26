@@ -12,6 +12,7 @@
 
         packages.nowify = pkgs.writeShellScriptBin "nowify" ''
           set -euo pipefail
+          export PATH="${pkgs.sqlite}/bin:$PATH"
           exec ${pkgs.deno}/bin/deno run --allow-read --allow-write --allow-env ${./nowify.ts} -- $@
         '';
 
