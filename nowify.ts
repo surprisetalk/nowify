@@ -8,8 +8,6 @@ import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 
 import { serve } from "https://deno.land/std@0.191.0/http/server.ts";
 
-import { readLines } from "https://deno.land/std@0.192.0/io/mod.ts";
-
 ////////////////////////////////////////////////////////////////////////////////
 
 const {
@@ -71,32 +69,27 @@ const csvLine = (x: string) => {
 
 const routines = [];
 {
-  const f = await Deno.open(csv.replace(`~`, Deno.env.get("HOME") ?? `~`));
-  const row = 0;
-  let keys = null;
-  for await (const routine of readLines(f)) {
+  const [head, ...body] = (
+    await Deno.readTextFile(csv.replace(`~`, Deno.env.get("HOME") ?? `~`))
+  ).split("\n");
+  const keys = csvLine(head) ?? [];
+  for (const k of [
+    "days",
+    "start",
+    "end",
+    "duration",
+    "score",
+    "event",
+    "desc",
+  ])
+    if (!keys.includes(k))
+      throw Error(`routines.csv must include header row with a '${k}' column.`);
+  for await (const routine of body) {
     const values = csvLine(routine) ?? [];
-    if (row === 0) keys = values;
-    if (!keys) throw new Error(`routines.csv requires a CSV header.`);
-    for (const k of [
-      "days",
-      "start",
-      "end",
-      "duration",
-      "score",
-      "event",
-      "desc",
-    ])
-      if (!keys || !keys.includes(k))
-        throw Error(
-          `routines.csv must include header row with a '${k}' column.`
-        );
-    routines.push(Object.fromEntries(keys.map((k, i) => [k, values[i]])));
+    if (values.length)
+      routines.push(Object.fromEntries(keys.map((k, i) => [k, values[i]])));
   }
-  f.close();
 }
-
-console.log(routines);
 
 const routinesKeys = ["id", ...Object.keys(routines?.[0] ?? {})]; // TODO: kludge
 const routinesVals = routines.map((o: Record<string, unknown>, id) =>
