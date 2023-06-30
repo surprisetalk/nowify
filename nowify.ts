@@ -170,11 +170,11 @@ switch (help ? `help` : command) {
       .query(
         `
       with recursive times(t) as (
-        values('04:00:00')
+        values('00:00:00')
         union all
         select time(t, '+30 minutes')
         from times
-        where t < '23:00:00'
+        where t <= '23:00:00'
       )
       select * from times
     `
@@ -244,14 +244,27 @@ switch (help ? `help` : command) {
     break;
   }
 
-  // TODO: change name to "export" and add import option
-  case "dump":
+  case "export":
     console.log("created_at, event, action");
     for (const row of db.query(`select * from log`)) {
       // TODO: this doesn't escape quotes or commas
       console.log(row.join(`, `));
     }
     break;
+
+  case "import": {
+    const decoder = new TextDecoder();
+    let stdin = ``;
+    for await (const chunk of Deno.stdin.readable) {
+      stdin += decoder.decode(chunk);
+    }
+    for (const line of stdin.split(`\n`))
+      db.query(
+        `insert into log (created_at, event, action) values (?, ?, ?)`,
+        csvLine(line) ?? []
+      );
+    break;
+  }
 
   case "server": {
     await serve(
