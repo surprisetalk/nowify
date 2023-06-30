@@ -166,59 +166,41 @@ switch (help ? `help` : command) {
 
   case "stats": {
     console.log();
-    const times = db
-      .query(
-        `
-      with recursive times(t) as (
-        values('00:00:00')
-        union all
-        select time(t, '+30 minutes')
-        from times
-        where t <= '23:00:00'
-      )
-      select * from times
-    `
-      )
-      .map(x => x?.[0]) as string[];
-    const now = [
-      new Date().getHours(),
-      new Date().getMinutes() <= 30 ? "00" : "30",
-      "00",
-    ].join(":");
-    for (const t of times) {
-      // TODO: Rework this so that the daily wraparound can be adjusted, i.e. "midnight" can be moved around.
-      const stats = Object.fromEntries(
-        db
-          .query(
-            `
-          with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
-          select 
-            cast(julianday('now') as integer) - cast(julianday(l.created_at) as integer) as days_ago
-            , max(coalesce(score,1)) as score
-          from log l
-          left join r on l.event = r.event
-          where l.action = 'done'
-            and time(datetime(l.created_at,'localtime')) between '${t}' and time('${t}', '+29 minutes', '+59 seconds')
-        `
-          )
-          .filter(row => row?.[0] !== null)
+    const log: string[][] = db.query(`
+      with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
+      select datetime(created_at,'localtime'), coalesce(score,1) as score
+      from log l
+      left join r on l.event = r.event
+      where l.action = 'done'
+      and 90 > julianday('now') - julianday(l.created_at)
+    `);
+    const stats: number[][] = new Array(48)
+      .fill(null)
+      .map(() => new Array(61).fill(0));
+    const now = new Date().getTime();
+    for (const [t_, score] of log) {
+      const t = new Date(t_);
+      const daysAgo = Math.floor((now - t.getTime()) / (24 * 60 * 60 * 1000));
+      // TODO: do from midnight instead
+      const halfhours = Math.floor(
+        2 * t.getHours() + (t.getMinutes() >= 30 ? 1 : 0)
       );
+      stats[halfhours][daysAgo] = parseInt(score);
+    }
+    for (const halfhours in stats)
       console.log(
-        t.match(/^([0-9]{2}):00:00$/)?.[1] ?? `  `,
-        ` `,
-        Array(61)
-          .fill(0)
+        (parseInt(halfhours) % 2 === 0
+          ? `${parseInt(halfhours) / 2}`.padStart(2, "0")
+          : "  ") + " ",
+        stats[halfhours]
           .map(
             (_, i) =>
-              null ??
-              (t === now ? colors.red : colors.green)(
-                [null, `░`, `▒`, `▓`, `█`][stats[i] ?? 0]
-              ) ??
-              (i % 7 === 0 ? colors.yellow(`┊`) : ` `)
+              (false ? colors.red : colors.green)(
+                [null, `░`, `▒`, `▓`, `█`][stats[halfhours][i] ?? 0]
+              ) ?? (i % 7 === 0 ? colors.yellow(`┊`) : ` `)
           )
           .join(``)
       );
-    }
     console.log();
     break;
   }
