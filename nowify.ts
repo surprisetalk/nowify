@@ -8,23 +8,25 @@ import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 
 import { serve } from "https://deno.land/std@0.191.0/http/server.ts";
 
-import { readCSVObjects } from "https://deno.land/x/csv@v0.8.0/mod.ts";
+import { readLines } from "https://deno.land/std@0.192.0/io/mod.ts";
 
 ////////////////////////////////////////////////////////////////////////////////
 
-const { _: args, help, routines: csv, db: sqliteFile } = parseArgs(
-  Deno.args,
-  {
-    default: {
-      help: false,
-      routines: `~/.config/nowify/routines.csv`,
-      db: `nowify.db`, // TODO: Where is the best place to store this by default?
-    },
-    boolean: ["help"],
-    string: ["routines", "db"],
-    alias: { h: "help" },
+const {
+  _: args,
+  help,
+  routines: csv,
+  db: sqliteFile,
+} = parseArgs(Deno.args, {
+  default: {
+    help: false,
+    routines: `~/.config/nowify/routines.csv`,
+    db: `nowify.db`, // TODO: Where is the best place to store this by default?
   },
-);
+  boolean: ["help"],
+  string: ["routines", "db"],
+  alias: { h: "help" },
+});
 
 const command = args.join(` `).trim();
 
@@ -46,19 +48,61 @@ db.execute(`
   )
 `);
 
+// https://stackoverflow.com/a/8497474
+const csvLine = (x: string) => {
+  const re_valid =
+    /^\s*(?:'[^'\\]*(?:\\[\S\s][^'\\]*)*'|"[^"\\]*(?:\\[\S\s][^"\\]*)*"|[^,'"\s\\]*(?:\s+[^,'"\s\\]+)*)\s*(?:,\s*(?:'[^'\\]*(?:\\[\S\s][^'\\]*)*'|"[^"\\]*(?:\\[\S\s][^"\\]*)*"|[^,'"\s\\]*(?:\s+[^,'"\s\\]+)*)\s*)*$/;
+  const re_value =
+    /(?!\s*$)\s*(?:'([^'\\]*(?:\\[\S\s][^'\\]*)*)'|"([^"\\]*(?:\\[\S\s][^"\\]*)*)"|([^,'"\s\\]*(?:\s+[^,'"\s\\]+)*))\s*(?:,|$)/g;
+  if (!re_valid.test(x)) return null;
+  const a = [];
+  x.replace(re_value, (_, m1, m2, m3) => {
+    // Remove backslash from \' in single quoted values.
+    if (m1 !== undefined) a.push(m1.replace(/\\'/g, "'"));
+    // Remove backslash from \" in double quoted values.
+    else if (m2 !== undefined) a.push(m2.replace(/\\"/g, '"'));
+    else if (m3 !== undefined) a.push(m3);
+    return ""; // Return empty string.
+  });
+  // Handle special case of empty last value.
+  if (/,\s*$/.test(x)) a.push("");
+  return a;
+};
+
 const routines = [];
-const f = await Deno.open(csv.replace(`~`, Deno.env.get("HOME") ?? `~`));
-for await (const routine of readCSVObjects(f)) {
-  routines.push(routine);
+{
+  const f = await Deno.open(csv.replace(`~`, Deno.env.get("HOME") ?? `~`));
+  const row = 0;
+  let keys = null;
+  for await (const routine of readLines(f)) {
+    const values = csvLine(routine) ?? [];
+    if (row === 0) keys = values;
+    if (!keys) throw new Error(`routines.csv requires a CSV header.`);
+    for (const k of [
+      "days",
+      "start",
+      "end",
+      "duration",
+      "score",
+      "event",
+      "desc",
+    ])
+      if (!keys || !keys.includes(k))
+        throw Error(
+          `routines.csv must include header row with a '${k}' column.`
+        );
+    routines.push(Object.fromEntries(keys.map((k, i) => [k, values[i]])));
+  }
+  f.close();
 }
-f.close();
+
+console.log(routines);
 
 const routinesKeys = ["id", ...Object.keys(routines?.[0] ?? {})]; // TODO: kludge
-const routinesVals = routines.map(
-  (o: Record<string, unknown>, id) =>
-    routinesKeys.map((k) => `'${{ id, ...o }[k]}'`),
+const routinesVals = routines.map((o: Record<string, unknown>, id) =>
+  routinesKeys.map(k => `'${{ id, ...o }[k]}'`)
 );
-const routinesVals_ = routinesVals.map((x) => `(${x.join(",")})`).join(",");
+const routinesVals_ = routinesVals.map(x => `(${x.join(",")})`).join(",");
 
 const start = (): { event: string; desc: string } | null => {
   const [[event, desc, isStart] = []]: [string?, string?, boolean?][] =
@@ -80,10 +124,9 @@ const start = (): { event: string; desc: string } | null => {
   `) ?? [];
   if (!event || !desc) return null;
   if (!isStart) {
-    db.query(
-      `insert into log (event, action) values (?, 'start')`,
-      [event as string],
-    );
+    db.query(`insert into log (event, action) values (?, 'start')`, [
+      event as string,
+    ]);
   }
   return { event, desc };
 };
@@ -97,8 +140,11 @@ const colors = {
 switch (help ? `help` : command) {
   case "cli": {
     const t = () =>
-      [new Date().getHours(), new Date().getMinutes(), new Date().getSeconds()]
-        .join(":");
+      [
+        new Date().getHours(),
+        new Date().getMinutes(),
+        new Date().getSeconds(),
+      ].join(":");
     const keymap: Record<string, string> = {
       d: `done`,
       s: `skip`,
@@ -127,7 +173,9 @@ switch (help ? `help` : command) {
 
   case "stats": {
     console.log();
-    const times = db.query(`
+    const times = db
+      .query(
+        `
       with recursive times(t) as (
         values('04:00:00')
         union all
@@ -136,7 +184,9 @@ switch (help ? `help` : command) {
         where t < '23:00:00'
       )
       select * from times
-    `).map((x) => x?.[0]) as string[];
+    `
+      )
+      .map(x => x?.[0]) as string[];
     const now = [
       new Date().getHours(),
       new Date().getMinutes() <= 30 ? "00" : "30",
@@ -145,7 +195,9 @@ switch (help ? `help` : command) {
     for (const t of times) {
       // TODO: Rework this so that the daily wraparound can be adjusted, i.e. "midnight" can be moved around.
       const stats = Object.fromEntries(
-        db.query(`
+        db
+          .query(
+            `
           with r (${routinesKeys.join(",")}) as (values ${routinesVals_})
           select 
             cast(julianday('now') as integer) - cast(julianday(l.created_at) as integer) as days_ago
@@ -154,20 +206,24 @@ switch (help ? `help` : command) {
           left join r on l.event = r.event
           where l.action = 'done'
             and time(datetime(l.created_at,'localtime')) between '${t}' and time('${t}', '+29 minutes', '+59 seconds')
-        `).filter((row) => row?.[0] !== null),
+        `
+          )
+          .filter(row => row?.[0] !== null)
       );
       console.log(
         t.match(/^([0-9]{2}):00:00$/)?.[1] ?? `  `,
         ` `,
-        Array(61).fill(0)
-          .map((_, i) =>
-            null ??
+        Array(61)
+          .fill(0)
+          .map(
+            (_, i) =>
+              null ??
               (t === now ? colors.red : colors.green)(
-                [null, `░`, `▒`, `▓`, `█`][stats[i] ?? 0],
+                [null, `░`, `▒`, `▓`, `█`][stats[i] ?? 0]
               ) ??
               (i % 7 === 0 ? colors.yellow(`┊`) : ` `)
           )
-          .join(``),
+          .join(``)
       );
     }
     console.log();
@@ -207,38 +263,37 @@ switch (help ? `help` : command) {
   case "server": {
     await serve(
       (req: Request): Response => {
-        const route = new URLPattern({ pathname: "/:route" }).exec(req.url)
-          ?.pathname?.groups?.route ?? "";
+        const route =
+          new URLPattern({ pathname: "/:route" }).exec(req.url)?.pathname
+            ?.groups?.route ?? "";
         if (route === "event") {
           return Response.json(start(), { status: 200 });
         }
         if (["done", "skip", "wait"].includes(route)) {
           const { event } = start() ?? {};
           if (event) {
-            db.query(
-              `insert into log (event, action) values (?, ?)`,
-              [event, route],
-            );
+            db.query(`insert into log (event, action) values (?, ?)`, [
+              event,
+              route,
+            ]);
           }
           return new Response(null, { status: 201 });
         }
         return new Response(`not found`, { status: 404 });
       },
-      { port: 8000 },
+      { port: 8000 }
     );
     break;
   }
 
   default:
     console.log(colors.red(`invalid command: "${command}"`));
-    // falls through
+  // falls through
   case "":
   case "help":
     // TODO
     // TODO: create docs for how to run annoy inline like `watch -n 2 -c deno annoy.ts`
-    console.log([
-      "usage blah blah blah",
-    ].join(`\n`));
+    console.log(["usage blah blah blah"].join(`\n`));
     break;
 }
 
